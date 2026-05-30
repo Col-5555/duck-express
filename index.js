@@ -18,11 +18,17 @@ if (!process.env.MONGODB_URI || !process.env.MONGODB_DB) {
 
 const client = new MongoClient(process.env.MONGODB_URI);
 let db;
+let dbError = null;
 
 async function connectDB() {
-  await client.connect();
-  db = client.db(process.env.MONGODB_DB);
-  console.log(`Connected to MongoDB database: ${process.env.MONGODB_DB}`);
+  try {
+    await client.connect();
+    db = client.db(process.env.MONGODB_DB);
+    console.log(`Connected to MongoDB database: ${process.env.MONGODB_DB}`);
+  } catch (err) {
+    dbError = err.message;
+    console.error('Failed to connect to MongoDB:', err.message);
+  }
 }
 
 app.get('/', (req, res) => {
@@ -31,6 +37,11 @@ app.get('/', (req, res) => {
 
 // Quick health check that proves the DB connection is live
 app.get('/db-health', async (req, res) => {
+  if (!db) {
+    return res
+      .status(503)
+      .json({ status: 'connecting', error: dbError });
+  }
   try {
     await db.command({ ping: 1 });
     res.json({ status: 'ok', database: process.env.MONGODB_DB });
@@ -39,14 +50,10 @@ app.get('/db-health', async (req, res) => {
   }
 });
 
-// Connect to the DB first, then start accepting requests
-connectDB()
-  .then(() => {
-    app.listen(PORT, () => {
-      console.log(`Server running on port ${PORT}`);
-    });
-  })
-  .catch((err) => {
-    console.error('Failed to connect to MongoDB:', err.message);
-    process.exit(1);
-  });
+// Start the web server immediately so the app always responds,
+// then connect to MongoDB in the background.
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});
+
+connectDB();
